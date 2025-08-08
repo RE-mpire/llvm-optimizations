@@ -6,6 +6,9 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -28,7 +31,10 @@ namespace {
             UnrollLoopOptions ULO;
             ULO.Runtime = false;
             ULO.Force = true;
-            ULO.Count = 4; // Unroll by a factor of 4
+            ULO.Count = SE.getSmallConstantTripCount(L);
+            if (ULO.Count == 0) {
+                ULO.Count = 8; // Fallback if unknown
+            }
 
             Loop *RemainderLoop = nullptr;
             bool Changed = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC, &TTI, nullptr, /*PreserveLCSSA=*/true, &RemainderLoop) != LoopUnrollResult::Unmodified;
