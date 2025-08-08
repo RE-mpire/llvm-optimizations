@@ -1,4 +1,9 @@
 #include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
@@ -10,7 +15,38 @@ namespace {
         LoopUnrollPass() : LoopPass(ID) {}
 
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
+            if (!L || !L->getLoopPreheader()) {
+                return false;
+            }
 
+            auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+            auto &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+            auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+            auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(*L->getHeader()->getParent());
+            auto &TTI = getAnalysis<TargetTransformInfoWrapperPass>().getTTI(*L->getHeader()->getParent());
+        
+            UnrollLoopOptions ULO;
+            ULO.Runtime = false;
+            ULO.Force = true;
+            ULO.Count = 4; // Unroll by a factor of 4
+
+            Loop *RemainderLoop = nullptr;
+            bool Changed = UnrollLoop(L, ULO, &LI, &SE, &DT, &AC, &TTI, nullptr, /*PreserveLCSSA=*/true, &RemainderLoop) != LoopUnrollResult::Unmodified;
+            errs() << "Unrolling loop: " << (Changed ? "Success" : "Failed") << "\n";
+            if (Changed) {
+                simplifyLoopAfterUnroll(L, /*SimplifyIVs=*/true, &LI, &SE, &DT, &AC, &TTI);
+            }
+
+            return Changed;
+        }
+
+        void getAnalysisUsage(AnalysisUsage &AU) const override {
+            AU.addRequired<LoopInfoWrapperPass>();
+            AU.addRequired<ScalarEvolutionWrapperPass>();
+            AU.addRequired<DominatorTreeWrapperPass>();
+            AU.addRequired<AssumptionCacheTracker>();
+            AU.addRequired<TargetTransformInfoWrapperPass>();
+            AU.addPreserved<LoopInfoWrapperPass>();
         }
     };
 
